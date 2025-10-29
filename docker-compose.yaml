@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   backend-go:
     build: ./backend-go
@@ -7,6 +6,7 @@ services:
       - "8080:8080"
     networks:
       - appnet
+    mem_limit: 512m
 
   backend-python:
     build: ./backend-python
@@ -15,17 +15,18 @@ services:
       - "8000:8000"
     networks:
       - appnet
+    mem_limit: 512m
 
-  frontend:
-    build: ./frontend
-    container_name: frontend
-    ports:
-      - "3000:3000"
-    networks:
-      - appnet
-    depends_on:
-      - backend-go
-      - backend-python
+  # frontend:
+  #   build: ./frontend
+  #   container_name: frontend
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - appnet
+  #   depends_on:
+  #     - backend-go
+  #     - backend-python
 
 networks:
   appnet:

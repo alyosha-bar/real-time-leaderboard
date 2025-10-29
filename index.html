@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Leaderboard</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f9f9f9;
+      margin: 0;
+      padding: 2rem;
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 1rem auto;
+      width: 60%;
+      background: white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #ddd;
+    }
+    th {
+      background-color: #007bff;
+      color: white;
+      text-transform: uppercase;
+      font-size: 0.9rem;
+    }
+    tr:hover {
+      background-color: #f1f1f1;
+    }
+    #status {
+      margin-top: 1rem;
+      color: #777;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>🏆 Live Leaderboard</h1>
+  <table id="leaderboard">
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Username</th>
+        <th>Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="3">Waiting for data...</td></tr>
+    </tbody>
+  </table>
+  <div id="status">Connecting to WebSocket...</div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const tbody = document.querySelector('#leaderboard tbody');
+
+    // Adjust the address as needed
+    const ws = new WebSocket("ws://localhost:8080/ws");
+
+    ws.onopen = () => {
+      statusEl.textContent = "✅ Connected to leaderboard updates";
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const entities = data.entities || [];
+
+        tbody.innerHTML = "";
+
+        if (entities.length === 0) {
+          tbody.innerHTML = "<tr><td colspan='3'>No entries yet</td></tr>";
+          return;
+        }
+
+        entities.forEach((entry, index) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${index + 1}</td>
+            <td>${entry.username}</td>
+            <td>${entry.score}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (err) {
+        console.error("Error parsing message:", err);
+      }
+    };
+
+    ws.onclose = () => {
+      statusEl.textContent = "❌ Disconnected from WebSocket";
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
+      statusEl.textContent = "⚠️ WebSocket error - check console";
+    };
+  </script>
+</body>
+</html>

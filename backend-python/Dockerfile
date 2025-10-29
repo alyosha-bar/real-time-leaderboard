@@ -1,6 +1,11 @@
 FROM python:3.11-slim
 WORKDIR /app
+
+# Copy dependencies and install
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
-CMD ["python", "main.py"]
+
+# Reduce concurrency for uvicorn to save memory
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
