@@ -37,10 +37,16 @@ var topics = []string{
 }
 
 var users = []User{
-	{1, "alice", "alice@example.com"},
-	{2, "bob", "bob@example.com"},
-	{3, "charlie", "charlie@example.com"},
-	{4, "diana", "diana@example.com"},
+	{1, "viserys", "viserys@example.com"},
+	{2, "daemon", "daemon@example.com"},
+	{3, "corlys", "corlys@example.com"},
+	{4, "rheanys", "rhenys@example.com"},
+	{5, "leanor", "leanor@example.com"},
+	{6, "aemond", "aemond@example.com"},
+	{7, "otto", "otto@example.com"},
+	{8, "jaeherys", "jaeherys@example.com"},
+	{9, "bealor", "bealor@example.com"},
+	{10, "mealor", "mealor@example.com"},
 }
 
 var challenges = []CodingChallenge{
