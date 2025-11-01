@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -24,21 +25,6 @@ type User struct {
 	Email    string `json:"email"`
 }
 
-type Submission struct {
-	ID             int             `json:"id"`
-	User           User            `json:"user"`
-	Challenge      CodingChallenge `json:"challenge"`
-	TimeToComplete int             `json:"time_to_complete"`
-	SubmittedAt    time.Time       `json:"submitted_at"`
-}
-
-type Analytics struct {
-	TotalSubmissions      int                `json:"total_submissions"`
-	AverageTimeToComplete float64            `json:"average_time_to_complete"`
-	Leaderboard           []LeaderboardEntry `json:"leaderboard"`
-	TopUser               string             `json:"top_user"`
-}
-
 type ScoreUpdate struct {
 	Username string `json:"username"`
 	Points   int    `json:"points"`
@@ -53,6 +39,12 @@ type Leaderboard struct {
 	Entities []LeaderboardEntry `json:"entities"`
 }
 
+type Analytics struct {
+	Total_Submissions int            `json:"total_submissions"`
+	Avg_Completion    int            `json:"avg_completion"`
+	Topics            map[string]int `json:"topics"`
+}
+
 var (
 	GlobalLeaderboard = Leaderboard{Entities: []LeaderboardEntry{}}
 	mu                sync.Mutex
@@ -63,34 +55,53 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow all connections (use cautiously — safe for local dev)
 		return true
 	},
 }
 
 // var broadcast = make(chan struct{})
 
+//
+
 func main() {
 
 	// HTTP server with Gin
 	router := gin.Default()
 
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins: true,
+	}))
+
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{"Leaderboard": GlobalLeaderboard})
 	})
 
-	router.POST("/analytics", func(c *gin.Context) {
-		// get analytics from python service
+	router.GET("/analytics", func(c *gin.Context) {
 
-		var analytics []Submission
+		// analytics object
+		var analytics Analytics
 
-		err := c.ShouldBindJSON(&analytics)
+		// bind to json
+
+		// fetch analytics from python service
+		resp, err := http.Get("http://backend-python:8000/analytics")
 		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			fmt.Println("Error, ", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reach analytics service."})
 			return
 		}
 
-		fmt.Printf("Received analytics: %+v\n", analytics)
+		defer resp.Body.Close()
+
+		err = json.NewDecoder(resp.Body).Decode(&analytics)
+		if err != nil {
+			fmt.Println("Error decoding analytics:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode analytics"})
+			return
+		}
+
+		// return analytics to frontend
+		c.JSON(http.StatusOK, analytics)
 	})
 
 	// python service calls this endpoint

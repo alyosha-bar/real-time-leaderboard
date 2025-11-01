@@ -21,16 +21,16 @@ const Leaderboard = () => {
         const ws = new WebSocket("ws://localhost:8080/ws")
 
         ws.onopen = () => {
-            setConnectionString("✅ Connected to leaderboard updates.")
+            setConnectionString("Connected to leaderboard updates.")
         }
 
         ws.onclose = () => {
-            setConnectionString("❌ Disconnected from WebSockets.")
+            setConnectionString("Disconnected from WebSockets.")
         }
 
         ws.onerror = (err) => {
             console.error("WebSocket error:", err)
-            setConnectionString("⚠️ WebSocket error - check console")
+            setConnectionString("WebSocket error - check console")
         }
 
         ws.onmessage = (event) => {

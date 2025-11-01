@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Dict
 
 class CodingChallenge(BaseModel):
     id: int
@@ -19,3 +20,12 @@ class Submission(BaseModel):
     challenge: CodingChallenge
     time_to_complete: int
     submitted_at: datetime
+
+
+class Analytics(BaseModel):
+    total_submissions: int
+    avg_completion: int
+
+
+    # mapping of topic to amount of submissions (Bar graph)
+    topics: Dict[str, int]
