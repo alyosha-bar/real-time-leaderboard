@@ -41,7 +41,7 @@ const App = () => {
           <div className='metrics'>
             <span className='metric'>Total Submissions: {analytics?.total_submissions ?? 0}</span>
             <span className='metric'>Avg Completion: {analytics?.avg_completion ?? 0}s</span>
-            <span className='metric'>Another Metric</span>
+            {/* <span className='metric'>Another Metric</span> */}
           </div>
 
           <div className='chart'>
