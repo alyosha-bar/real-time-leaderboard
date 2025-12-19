@@ -1,13 +1,6 @@
-from fastapi import FastAPI, BackgroundTasks
-from fastapi.encoders import jsonable_encoder
-import httpx
-import asyncio
-from typing import List, Dict
+from fastapi import FastAPI
+from typing import Dict
 from models import Submission
-from datetime import datetime
-import statistics
-import logging
-import json
 
 import redis
 
@@ -24,7 +17,7 @@ def root():
 
 # Endpoint for receiving and validating submissions
 @app.post("/submit", response_model=Dict[str, str])
-async def submit_submission(submission: Submission):
+def submit_submission(submission: Submission):
     # extract user.username and challenge.points
     username = submission.user.username
     points = submission.challenge.points
@@ -41,7 +34,10 @@ async def submit_submission(submission: Submission):
 
 
 # function for pushing to REDIS
-async def push_to_redis(username: str, points: int):
+def push_to_redis(username: str, points: int):
+
+    print("Pushing to Redis:", username, points)
+
     r.zincrby("leaderboard", points, username)
     return
 
