@@ -2,103 +2,95 @@ import { useEffect, useState } from 'react'
 import '../App.css'
 import { motion, AnimatePresence } from 'framer-motion'
 
-
-
-
-
 interface Entry {
-  username: string,
-  score: number
+  Member: string;
+  Score: number;
 }
 
 const Leaderboard = () => {
+  const [connectionString, setConnectionString] = useState('Not Connected')
+  const [leaderboardEntries, setLeaderboardEntries] = useState<Entry[]>([])
 
-    const [connectionString, setConnectionString] = useState('Not Connected to Websockets.')
-    const [leaderboardEntries, setLeaderboardEntries] = useState<Entry[]>()
+  useEffect(() => {
+    // Note: When you deploy, change 'localhost' to your Fly.io/Render URL
+    const ws = new WebSocket("ws://localhost:8080/ws")
 
+    ws.onopen = () => {
+      setConnectionString("Connected")
+    }
 
-    useEffect(() => {
-        const ws = new WebSocket("ws://localhost:8080/ws")
+    ws.onclose = () => {
+      setConnectionString("Disconnected")
+    }
 
-        ws.onopen = () => {
-            setConnectionString("Connected to leaderboard updates.")
-        }
+    ws.onmessage = (event) => {
+      try {
+        // Your Go server sends: [{username: "user1", score: 100}, ...]
+        const data = JSON.parse(event.data)
+        
+        // Directly set the data because Go sends the array as the top-level object
+        setLeaderboardEntries(data || [])
+      } catch (err) {
+        console.error("Error parsing leaderboard JSON:", err)
+      }
+    }
 
-        ws.onclose = () => {
-            setConnectionString("Disconnected from WebSockets.")
-        }
+    return () => ws.close()
+  }, [])
 
-        ws.onerror = (err) => {
-            console.error("WebSocket error:", err)
-            setConnectionString("WebSocket error - check console")
-        }
+  return (
+    <div className="leaderboard-page">
+      <div className="status-bar">
+         <span className={`dot ${connectionString === 'Connected' ? 'online' : 'offline'}`}></span>
+         {connectionString}
+      </div>
 
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data)
-                setLeaderboardEntries(data.entities || [])
-            } catch (err) {
-                console.error("Error parsing message:", err)
-            }
-        }
-
-        // cleanup function
-        return () => {
-            ws.close()
-        }
-    }, [])
-
-
-    return ( 
-        <div className="leaderboard-page">
-            {/* <h1 className="title"> Live Leaderboard </h1> */}
-
-            <div className="leaderboard-card">
-                {leaderboardEntries && (
-                <AnimatePresence>
-                    {leaderboardEntries.length > 0 ? (
-                    <motion.ul
-                        layout
-                        className="leaderboard-list"
-                        transition={{ layout: { duration: 0.4, type: 'spring' } }}
-                    >
-                        {leaderboardEntries.map((entry, index) => (
-                        <motion.li
-                            layout
-                            key={entry.username}
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="leaderboard-row"
-                        >
-                            <div className="player-info">
-                            <motion.span layout className="rank">
-                                {index + 1}.
-                            </motion.span>
-                            <span className="username">{entry.username}</span>
-                            </div>
-                            <motion.span
-                            layout
-                            animate={{ scale: [1, 1.1, 1] }}
-                            transition={{ duration: 0.3 }}
-                            className="score"
-                            >
-                            {entry.score}
-                            </motion.span>
-                        </motion.li>
-                        ))}
-                    </motion.ul>
-                    ) : (
-                    <div className="no-data">No leaderboard data</div>
-                    )}
-                </AnimatePresence>
-                )}
-            </div>
-
-            {/* <div className="connection-status">{connectionString}</div> */}
-            </div>
-    );
+      <div className="leaderboard-card">
+        <AnimatePresence mode="popLayout">
+          {leaderboardEntries.length > 0 ? (
+            <motion.ul
+              layout
+              className="leaderboard-list"
+            >
+              {leaderboardEntries.map((entry, index) => (
+                <motion.li
+                  layout
+                  // IMPORTANT: Using username as key allows Framer Motion 
+                  // to animate the row moving UP or DOWN when ranks change
+                  key={entry.Member} 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ 
+                    layout: { type: "spring", stiffness: 300, damping: 30 },
+                    opacity: { duration: 0.2 } 
+                  }}
+                  className="leaderboard-row"
+                >
+                  <div className="player-info">
+                    <span className="rank">{index + 1}</span>
+                    <span className="username">{entry.Member}</span>
+                  </div>
+                  
+                  <motion.span
+                    // This creates a "pulse" effect whenever the score updates
+                    key={entry.Score}
+                    initial={{ scale: 1.2, color: "#f39c12" }}
+                    animate={{ scale: 1, color: "#000" }}
+                    className="score"
+                  >
+                    {entry.Score.toLocaleString()}
+                  </motion.span>
+                </motion.li>
+              ))}
+            </motion.ul>
+          ) : (
+            <div className="no-data">Waiting for scores...</div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
 }
- 
+
 export default Leaderboard;

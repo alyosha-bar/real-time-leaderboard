@@ -1,123 +1,59 @@
-from fastapi import FastAPI, BackgroundTasks
-from fastapi.encoders import jsonable_encoder
-import httpx
-import asyncio
-from typing import List, Dict
+from fastapi import FastAPI
+from typing import Dict
 from models import Submission
-from models import Analytics
-from datetime import datetime
-import statistics
-import logging
-import json
+
+import redis
 
 app = FastAPI(title="Real-Time Leaderboard Analytics")
 
 
-# global variables to replace databases for development purposes
-submissions: List[Submission] = []
+pool = redis.ConnectionPool(host='localhost', port=6379, db=0, decode_responses=True)
+r = redis.Redis(connection_pool=pool)
 
-analytics : Analytics = Analytics(
-    total_submissions=0,
-    avg_completion=0,
-    topics={
-        "Sorting Algorithms": 0,
-        "REST API Design": 0,
-        "Concurrency": 0,
-        "Data Structures": 0,
-        "Graph Theory": 0,
-        "Dynamic Programming": 0,
-        "File I/O": 0,
-        "Unit Testing": 0,
-    }
-)
-
-
+# Basic root endpoint
 @app.get("/")
 def root():
     return {"message": "Real-Time Leaderboard Analytics API running."}
 
-@app.post("/submit")
-def receive_submission(sub: Submission, background_tasks: BackgroundTasks):
+# Endpoint for receiving and validating submissions
+@app.post("/submit", response_model=Dict[str, str])
+def submit_submission(submission: Submission):
+    # extract user.username and challenge.points
+    username = submission.user.username
+    points = submission.challenge.points
 
-    global analytics
+    # push to redis
+    push_to_redis(username, points)
 
-    submissions.append(sub)
-    print(f"Received submission: {sub}")
+    # publish event to notify Go service
+    publish_event()
 
-    # update analytics based on submissions
-    total_submissions = len(submissions)
-    
-    # generate mapping
-    topics = {
-        "Sorting Algorithms": 0,
-        "REST API Design": 0,
-        "Concurrency": 0,
-        "Data Structures": 0,
-        "Graph Theory": 0,
-        "Dynamic Programming": 0,
-        "File I/O": 0,
-        "Unit Testing": 0,
-    }
-
-    # avg time to complete
-    total_time = 0
-
-
-    for sub in submissions:
-        total_time += sub.time_to_complete
-        # increment dict where key is sub.topic
-        topic = sub.challenge.topic
-        topics[topic] = topics.get(topic, 0) + 1
-    
-    avg_completion = int(total_time / total_submissions) # sum of submission times / total_submissions
+    return {"status": "success", "message": "Submission received and processed."}
 
 
 
-    analytics = Analytics(
-        total_submissions = total_submissions,
-        avg_completion = avg_completion,
-        topics = topics
-    )
+
+# function for pushing to REDIS
+def push_to_redis(username: str, points: int):
+
+    print("Pushing to Redis:", username, points)
+
+    r.zincrby("leaderboard", points, username)
+    return
+
+
+# publish an event (Go will subscribe)    
+def publish_event():
+    r.publish("score_updates", "new_score_recorded")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
 
 
 
-    score = get_score(sub)
-    print(f"Score for submission: {score}")
-    background_tasks.add_task(push_score, score)
-
-    return {"status": "Submission received"}
 
 
-@app.get("/submissions", response_model=List[Submission])
-async def get_submissions():
 
-    serialized_submissions = serialize_submissions(submissions)
-    print(f"Serialized submissions: {serialized_submissions}")
-
-    return serialized_submissions
-
-@app.get("/analytics", response_model=Analytics)
-def get_analytics():
-
-    if not analytics:
-        return {"message": "No analytics yet."}
-    
-
-    return jsonable_encoder(analytics)
-
-
-def get_score(sub: Submission):
-    return {
-        "username": sub.user.username,
-        "points": sub.challenge.points,
-    }
-
-
-async def push_score(score):
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post("http://backend-go:8080/score", json=score)
-            response.raise_for_status()
-    except Exception as e:
-        logging.error(f"Failed to push score: {e}")
 

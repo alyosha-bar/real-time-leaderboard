@@ -1,181 +1,191 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
-	"sort"
 	"sync"
 	"time"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
-type CodingChallenge struct {
-	ID     int    `json:"id"`
-	Points int    `json:"points"`
-	Topic  string `json:"topic"`
-}
-
 type User struct {
-	ID       int    `json:"id"`
 	Username string `json:"username"`
-	Email    string `json:"email"`
 }
 
-type ScoreUpdate struct {
-	Username string `json:"username"`
-	Points   int    `json:"points"`
+type Challenge struct {
+	ID     int `json:"id"`
+	Points int `json:"points"`
 }
 
-type LeaderboardEntry struct {
-	Username string `json:"username"`
-	Score    int    `json:"score"`
-}
-
-type Leaderboard struct {
-	Entities []LeaderboardEntry `json:"entities"`
-}
-
-type Analytics struct {
-	Total_Submissions int            `json:"total_submissions"`
-	Avg_Completion    int            `json:"avg_completion"`
-	Topics            map[string]int `json:"topics"`
+type Submission struct {
+	User      User      `json:"user"`
+	Challenge Challenge `json:"challenge"`
 }
 
 var (
-	GlobalLeaderboard = Leaderboard{Entities: []LeaderboardEntry{}}
-	mu                sync.Mutex
+	ctx              = context.Background()
+	isDirty          = false
+	isDirtyMutex     sync.Mutex // preventing race conditions
+	broadcastChannel = make(chan string)
 )
 
-// upgrade http server to websockets
+func main() {
+	// initialize Redis client
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	hub := NewHub()
+
+	// WS handler
+	go hub.Run()
+
+	// start background goroutines
+	go listenToRedis(rdb)
+	go startTicker(rdb, hub)
+
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		serveWs(hub, w, r)
+	})
+
+	log.Println("Go server starting on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal("ListenAndServe:", err)
+	}
+
+}
+
+func listenToRedis(rdb *redis.Client) {
+	pubsub := rdb.Subscribe(ctx, "score_updates")
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+	for range ch {
+		isDirtyMutex.Lock()
+		isDirty = true
+		isDirtyMutex.Unlock()
+	}
+}
+
+func startTicker(rdb *redis.Client, hub *Hub) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	for range ticker.C {
+		isDirtyMutex.Lock()
+		if isDirty {
+			// Fetch Top 10 from Redis
+			vals, _ := rdb.ZRevRangeWithScores(ctx, "leaderboard", 0, 9).Result()
+
+			// Marshal into JSON
+			payload, _ := json.Marshal(vals)
+
+			// Push to the Hub's broadcast channel
+			hub.broadcast <- payload
+
+			isDirty = false
+		}
+		isDirtyMutex.Unlock()
+	}
+}
+
+type Client struct {
+	hub  *Hub
+	conn *websocket.Conn
+	// Buffered channel of outbound messages.
+	send chan []byte
+}
+
+// Hub logic
+type Hub struct {
+	// Registered clients.
+	clients map[*Client]bool
+
+	// Inbound messages from the Ticker.
+	broadcast chan []byte
+
+	// Register requests from the clients.
+	register chan *Client
+
+	// Unregister requests from clients.
+	unregister chan *Client
+}
+
+func NewHub() *Hub {
+	return &Hub{
+		broadcast:  make(chan []byte),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		clients:    make(map[*Client]bool),
+	}
+}
+
+func (h *Hub) Run() {
+	for {
+		select {
+		case client := <-h.register:
+			h.clients[client] = true
+		case client := <-h.unregister:
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.send)
+			}
+		case message := <-h.broadcast:
+			for client := range h.clients {
+				select {
+				case client.send <- message:
+				default:
+					close(client.send)
+					delete(h.clients, client)
+				}
+			}
+		}
+	}
+}
+
+// WebSocket handler
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	// Allow all origins for local development (Careful in Production!)
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// var broadcast = make(chan struct{})
+func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 
-//
+	// Create a new Client for this user
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
 
-func main() {
+	// Register the client with the Hub
+	hub.register <- client
 
-	// HTTP server with Gin
-	router := gin.Default()
-
-	router.Use(cors.New(cors.Config{
-		AllowAllOrigins: true,
-	}))
-
-	router.GET("/", func(c *gin.Context) {
-		c.JSON(200, gin.H{"Leaderboard": GlobalLeaderboard})
-	})
-
-	router.GET("/analytics", func(c *gin.Context) {
-
-		// analytics object
-		var analytics Analytics
-
-		// bind to json
-
-		// fetch analytics from python service
-		resp, err := http.Get("http://backend-python:8000/analytics")
-		if err != nil {
-			fmt.Println("Error, ", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reach analytics service."})
-			return
-		}
-
-		defer resp.Body.Close()
-
-		err = json.NewDecoder(resp.Body).Decode(&analytics)
-		if err != nil {
-			fmt.Println("Error decoding analytics:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode analytics"})
-			return
-		}
-
-		// return analytics to frontend
-		c.JSON(http.StatusOK, analytics)
-	})
-
-	// python service calls this endpoint
-	router.POST("/score", func(c *gin.Context) {
-
-		var score ScoreUpdate
-
-		err := c.ShouldBindJSON(&score)
-		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-
-		fmt.Printf("Received score: %+v\n", score)
-
-		// update leaderboard based on new score
-		// add points to user whose score was received (maybe add them to leaderbaord if not already present)
-		addOrUpdateLeaderboard(score.Username, score.Points)
-
-		// reshuffle leaderboard based on points
-		SortLeaderboard()
-
-		c.JSON(200, gin.H{"status": "Score received"})
-	})
-
-	// Websockets server
-	router.GET("/ws", func(c *gin.Context) {
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-		if err != nil {
-			return
-		}
-
-		defer conn.Close()
-
-		for {
-			// <-broadcast
-			data, _ := json.Marshal(GlobalLeaderboard)
-			conn.WriteMessage(websocket.TextMessage, data)
-			time.Sleep(time.Second)
-		}
-	})
-
-	router.Run()
+	// Start the writing goroutine for this specific user
+	go client.writePump()
 }
 
-func addOrUpdateLeaderboard(username string, points int) {
-	mu.Lock()
-	defer mu.Unlock()
+func (c *Client) writePump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+	for {
+		message, ok := <-c.send
+		if !ok {
+			// The Hub closed the channel.
+			c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+		}
 
-	// Check if user already exists in leaderboard
-	for i, entry := range GlobalLeaderboard.Entities {
-		if entry.Username == username {
-			// Update points
-			GlobalLeaderboard.Entities[i].Score += points
+		err := c.conn.WriteMessage(websocket.TextMessage, message)
+		if err != nil {
 			return
 		}
 	}
-
-	// If user doesn't exist, add them to the leaderboard
-	newEntry := LeaderboardEntry{
-		Username: username,
-		Score:    points,
-	}
-	GlobalLeaderboard.Entities = append(GlobalLeaderboard.Entities, newEntry)
-
-	// broadcast <- struct{}{}
-}
-
-func SortLeaderboard() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	sort.Slice(GlobalLeaderboard.Entities, func(i, j int) bool {
-		return GlobalLeaderboard.Entities[i].Score > GlobalLeaderboard.Entities[j].Score
-	})
-
 }
