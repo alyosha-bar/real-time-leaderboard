@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -53,9 +55,19 @@ func main() {
 	})
 
 	log.Println("Go server starting on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe("127.0.0.1:8080", nil); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
+
+	go func() {
+		for {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			fmt.Printf("Alloc = %v MiB", m.Alloc/1024/1024)
+			fmt.Printf("\tGoroutines = %v\n", runtime.NumGoroutine())
+			time.Sleep(5 * time.Second)
+		}
+	}()
 
 }
 
@@ -154,6 +166,7 @@ var upgrader = websocket.Upgrader{
 }
 
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
@@ -168,6 +181,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	// Start the writing goroutine for this specific user
 	go client.writePump()
+	go client.readPump()
 }
 
 func (c *Client) writePump() {
@@ -186,6 +200,19 @@ func (c *Client) writePump() {
 		err := c.conn.WriteMessage(websocket.TextMessage, message)
 		if err != nil {
 			return
+		}
+	}
+}
+
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+	for {
+		_, _, err := c.conn.ReadMessage()
+		if err != nil {
+			break // Exit if connection is closed
 		}
 	}
 }
